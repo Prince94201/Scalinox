@@ -1,0 +1,16 @@
+{
+  "name": "scalinox-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node index.mjs"
+  },
+  "dependencies": {
+    "genkit": "^1.22.0",
+    "@genkit-ai/googleai": "^1.22.0",
+    "openai": "^4.69.0",
+    "express": "^4.19.2",
+    "dotenv": "^16.4.5"
+  }
+}
