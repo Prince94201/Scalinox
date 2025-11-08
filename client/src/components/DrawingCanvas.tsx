@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Tool, DrawingSettings } from '../App';
 import { TextFormatPanel } from './TextFormatPanel';
 import { AnimatePresence } from 'motion/react';
+import { Trash2 } from 'lucide-react';
 
 interface DrawingCanvasProps {
   currentTool: Tool;
@@ -38,6 +39,7 @@ interface DrawingElement {
   height?: number;
   id?: string;
   isTemporary?: boolean; // For showing preview before finalizing
+  isGeneratedAi?: boolean; // Mark images inserted from AI generation
 }
 
 // Helper function to generate unique IDs
@@ -126,6 +128,16 @@ export function DrawingCanvas({ currentTool, settings, zoom }: DrawingCanvasProp
       if (!canvas) return;
 
       if (format === 'png') {
+        // If an AI-generated image is selected, export only that image
+        const aiImage = elements.find(el => el.id === selectedElementId && el.type === 'image' && el.isGeneratedAi && el.imageData);
+        if (aiImage) {
+          const link = document.createElement('a');
+          link.download = 'generated-image.png';
+          link.href = aiImage.imageData!;
+          link.click();
+          return;
+        }
+
         const link = document.createElement('a');
         link.download = 'drawing.png';
         
@@ -218,8 +230,43 @@ export function DrawingCanvas({ currentTool, settings, zoom }: DrawingCanvasProp
 
     const handleAiGenerate = (e: Event) => {
       const customEvent = e as CustomEvent;
-      // Add AI generated content to canvas
-      console.log('AI Generate:', customEvent.detail);
+      const { sourceImage } = customEvent.detail || {};
+      if (!sourceImage) {
+        console.warn('AI Generate event missing sourceImage');
+        return;
+      }
+
+      const img = new Image();
+      img.onload = () => {
+        // Fit within 600x600 while keeping aspect ratio
+        const maxW = 600;
+        const maxH = 600;
+        let w = img.width;
+        let h = img.height;
+        const ratio = Math.min(maxW / w, maxH / h, 1);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+
+        const imageElement: DrawingElement = {
+          type: 'image',
+          startPoint: { x: 80, y: 80 },
+          imageData: sourceImage,
+          width: w,
+          height: h,
+          color: '#000000',
+          brushSize: 0,
+          opacity: 1,
+          id: generateId(),
+          isGeneratedAi: true,
+        };
+        const newElements = [...elements, imageElement];
+        setElements(newElements);
+        const newHistory = history.slice(0, historyStep + 1);
+        newHistory.push(newElements);
+        setHistory(newHistory);
+        setHistoryStep(newHistory.length - 1);
+      };
+      img.src = sourceImage;
     };
 
     const handleConvertToSketch = (e: Event) => {
@@ -364,7 +411,7 @@ export function DrawingCanvas({ currentTool, settings, zoom }: DrawingCanvasProp
       window.removeEventListener('canvas-get-selection', handleGetSelection);
       window.removeEventListener('canvas-get-full', handleGetFull);
     };
-  }, [elements, history, historyStep, selectionRect]);
+  }, [elements, history, historyStep, selectionRect, selectedElementId]);
 
   const redrawCanvas = () => {
     const canvas = canvasRef.current;
@@ -1211,6 +1258,30 @@ export function DrawingCanvas({ currentTool, settings, zoom }: DrawingCanvasProp
     });
   };
 
+  const handleDeleteSelected = () => {
+    if (!selectedElementId) return;
+    const el = elements.find(e => e.id === selectedElementId);
+    if (!el) return;
+    // Only allow delete for AI-generated images as requested
+    if (el.type === 'image' && el.isGeneratedAi) {
+      const newElements = elements.filter(e => e.id !== selectedElementId);
+      setElements(newElements);
+      saveToHistory(newElements);
+      setSelectedElementId(null);
+    }
+  };
+
+  const getSelectedAIBounds = () => {
+    if (!selectedElementId) return null;
+    const el = elements.find(e => e.id === selectedElementId);
+    if (!el || el.type !== 'image' || !el.isGeneratedAi || !el.startPoint || !el.width || !el.height) return null;
+    const x = el.startPoint.x * scale + offset.x;
+    const y = el.startPoint.y * scale + offset.y;
+    const w = el.width * scale;
+    const h = el.height * scale;
+    return { x, y, w, h };
+  };
+
   return (
     <div className="w-full h-full relative bg-white">
       {/* Dot grid background */}
@@ -1231,7 +1302,24 @@ export function DrawingCanvas({ currentTool, settings, zoom }: DrawingCanvasProp
           <span className="text-sm">Click and drag to select area</span>
         </div>
       )}
-      
+
+      {/* Delete overlay for selected AI-generated image */}
+      {(() => {
+        const b = getSelectedAIBounds();
+        if (!b) return null;
+        return (
+          <button
+            type="button"
+            onClick={handleDeleteSelected}
+            className="absolute z-20 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 shadow-md"
+            style={{ left: `${b.x + b.w - 16}px`, top: `${b.y - 16}px` }}
+            title="Delete generated image"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        );
+      })()}
+
       <canvas
         ref={canvasRef}
         className="absolute inset-0 cursor-crosshair"
